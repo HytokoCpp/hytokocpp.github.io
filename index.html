@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v4</title>
+	<title>Vision v5</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -39,17 +39,15 @@
 		const debug = document.getElementById('debug');
 		const ctx2d = canvas2d.getContext('2d');
 
-		let scene, camera, renderer, panel, drawCanvas, drawCtx, panelTexture;
+		let scene, camera, renderer, panel;
 		let isRunning = false;
 		let appState = "FOLLOW";
 		let handNDC = new THREE.Vector3();
-		let indexNDC = new THREE.Vector2();
 		let isPinching = false;
 		let camHelper;
 		let lastStepTime = 0;
 
 		const targetPosition = new THREE.Vector3();
-		const raycaster = new THREE.Raycaster();
 
 		function init3D() {
 			scene = new THREE.Scene();
@@ -60,18 +58,9 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			drawCanvas = document.createElement('canvas');
-			drawCanvas.width = 1024;
-			drawCanvas.height = 1024;
-			drawCtx = drawCanvas.getContext('2d');
-			drawCtx.fillStyle = '#ffffff';
-			drawCtx.fillRect(0, 0, 1024, 1024);
-
-			panelTexture = new THREE.CanvasTexture(drawCanvas);
-
 			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
 			const material = new THREE.MeshBasicMaterial({ 
-				map: panelTexture,
+				color: 0xffffff, 
 				transparent: true, 
 				opacity: 0.85,
 				side: THREE.DoubleSide
@@ -136,6 +125,7 @@
 			
 			await startSensors();
 			init3D();
+			resize();
 			
 			camHelper = new Camera(video, {
 				onFrame: async () => { await hands.send({image: video}); },
@@ -155,10 +145,7 @@
 
 		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 		hands.onResults((results) => {
-			canvas2d.width = window.innerWidth;
-			canvas2d.height = window.innerHeight;
 			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
-			
 			isPinching = false;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -180,9 +167,8 @@
 				const handY = (thumb.y + index.y) / 2;
 				
 				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
-				indexNDC.set((index.x * 2) - 1, -(index.y * 2) + 1);
 
-				if (dist3D < 0.12) {
+				if (dist3D < 0.14) {
 					isPinching = true;
 				}
 			}
@@ -195,10 +181,10 @@
 				const panelScreenPos = panel.position.clone().project(camera);
 				const distToPanel = Math.sqrt(Math.pow(handNDC.x - panelScreenPos.x, 2) + Math.pow(handNDC.y - panelScreenPos.y, 2));
 
-				const isAtBottom = (panelScreenPos.y - handNDC.y) > 0.05 && (panelScreenPos.y - handNDC.y) < 0.45 && Math.abs(handNDC.x - panelScreenPos.x) < 0.4;
+				const isNearGrabArea = Math.abs(handNDC.x - panelScreenPos.x) < 0.6 && (panelScreenPos.y - handNDC.y) > -0.1 && (panelScreenPos.y - handNDC.y) < 0.6;
 
 				if (isPinching) {
-					if (appState === "FOLLOW" || (appState === "STATIONARY" && isAtBottom)) {
+					if (appState === "FOLLOW" || (appState === "STATIONARY" && isNearGrabArea)) {
 						appState = "DRAG";
 					}
 				} else {
@@ -207,22 +193,7 @@
 					}
 				}
 
-				if (appState === "STATIONARY" && !isPinching) {
-					raycaster.setFromCamera(indexNDC, camera);
-					const intersects = raycaster.intersectObject(panel);
-					if (intersects.length > 0) {
-						const uv = intersects[0].uv;
-						const x = uv.x * drawCanvas.width;
-						const y = (1 - uv.y) * drawCanvas.height;
-						drawCtx.fillStyle = '#000000';
-						drawCtx.beginPath();
-						drawCtx.arc(x, y, 12, 0, Math.PI * 2);
-						drawCtx.fill();
-						panelTexture.needsUpdate = true;
-					}
-				}
-
-				debug.innerText = `STATE: ${appState}\nPINCH: ${isPinching ? "YES" : "NO"}\nAT BOTTOM: ${isAtBottom ? "YES" : "NO"}\nDIST: ${distToPanel.toFixed(2)}`;
+				debug.innerText = `STATE: ${appState}\nPINCH: ${isPinching ? "YES" : "NO"}\nGRAB ZONE: ${isNearGrabArea ? "YES" : "NO"}\nDIST: ${distToPanel.toFixed(2)}`;
 
 				if (appState === "FOLLOW") {
 					targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
@@ -244,13 +215,17 @@
 			}
 		}
 
-		window.addEventListener('resize', () => {
+		function resize() {
 			if (camera && renderer) {
 				camera.aspect = window.innerWidth / window.innerHeight;
 				camera.updateProjectionMatrix();
 				renderer.setSize(window.innerWidth, window.innerHeight);
+				canvas2d.width = window.innerWidth;
+				canvas2d.height = window.innerHeight;
 			}
-		});
+		}
+
+		window.addEventListener('resize', resize);
 	</script>
 </body>
 </html>
