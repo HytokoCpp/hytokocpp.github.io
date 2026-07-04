@@ -9,34 +9,93 @@
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 	<style>
-		body { margin: 0; background: #000; overflow: hidden; position: fixed; width: 100%; height: 100%; }
-		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-		#canvas_overlay { position: absolute; top: 0; left: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; }
-		#ui { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 100; }
-		.btn { background: #00ff00; color: black; border: none; padding: 15px 35px; border-radius: 40px; font-family: monospace; font-weight: bold; }
+		body {
+			margin: 0;
+			background: #000;
+			overflow: hidden;
+			width: 100vw;
+			height: 100vh;
+		}
+		#input_video {
+			position: absolute;
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			z-index: 1;
+		}
+		#canvas_3d {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: 2;
+			pointer-events: none;
+		}
+		#canvas_2d {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: 3;
+			pointer-events: none;
+		}
+		#ui {
+			position: absolute;
+			bottom: 50px;
+			left: 50%;
+			transform: translateX(-50%);
+			z-index: 100;
+		}
+		.btn {
+			background: #00ff00;
+			color: #000;
+			border: none;
+			padding: 18px 40px;
+			border-radius: 50px;
+			font-family: sans-serif;
+			font-weight: bold;
+			font-size: 16px;
+			box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+		}
+		#status {
+			position: absolute;
+			top: 20px;
+			width: 100%;
+			text-align: center;
+			color: #0f0;
+			z-index: 101;
+			font-family: monospace;
+			pointer-events: none;
+		}
 	</style>
 </head>
 <body>
 
+	<div id="status">LOADING...</div>
 	<video id="input_video" playsinline autoplay muted></video>
-	<canvas id="canvas_overlay"></canvas>
+	<canvas id="canvas_3d"></canvas>
+	<canvas id="canvas_2d"></canvas>
 
 	<div id="ui">
-		<button class="btn" id="lockBtn">SET CENTER</button>
+		<button class="btn" id="startBtn">SET CENTER</button>
 	</div>
 
 	<script type="module">
-		const videoElement = document.getElementById('input_video');
-		const canvasElement = document.getElementById('canvas_overlay');
-		const lockBtn = document.getElementById('lockBtn');
-		const ctx = canvasElement.getContext('2d');
+		const video = document.getElementById('input_video');
+		const canvas2d = document.getElementById('canvas_2d');
+		const canvas3d = document.getElementById('canvas_3d');
+		const startBtn = document.getElementById('startBtn');
+		const status = document.getElementById('status');
+		const ctx2d = canvas2d.getContext('2d');
 
 		let scene, camera, renderer, cube, grid, isLocked = false;
 
 		function init3D() {
 			scene = new THREE.Scene();
 			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-			renderer = new THREE.WebGLRenderer({ canvas: canvasElement, antialias: true, alpha: true });
+			renderer = new THREE.WebGLRenderer({ canvas: canvas3d, alpha: true, antialias: true });
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
@@ -45,42 +104,22 @@
 			cube.position.set(0, 0, -1.5);
 			scene.add(cube);
 
-			grid = new THREE.GridHelper(20, 40, 0xff0000, 0x333333);
+			grid = new THREE.GridHelper(20, 40, 0xff0000, 0x444444);
 			grid.position.y = -1;
 			scene.add(grid);
-			scene.add(new THREE.AmbientLight(0xffffff, 1));
 		}
-
-		async function requestPermissions() {
-			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-				const p = await DeviceOrientationEvent.requestPermission();
-				if (p === 'granted') window.addEventListener('deviceorientation', handleOrientation);
-			} else {
-				window.addEventListener('deviceorientation', handleOrientation);
-			}
-		}
-
-		function handleOrientation(e) {
-			if (!isLocked) return;
-			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
-			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
-			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-			camera.rotation.set(b, g, a);
-		}
-
-		lockBtn.onclick = async () => {
-			await requestPermissions();
-			isLocked = true;
-			grid.children[0].material.color.setHex(0x00ff00);
-			lockBtn.style.display = "none";
-		};
 
 		function onResults(results) {
-			ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+			status.innerText = results.multiHandLandmarks?.length > 0 ? "TRACKING" : "SCANNING";
+			
+			canvas2d.width = window.innerWidth;
+			canvas2d.height = window.innerHeight;
+			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
+			
 			if (results.multiHandLandmarks) {
 				for (const landmarks of results.multiHandLandmarks) {
-					drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
-					drawLandmarks(ctx, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
+					drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
+					drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 3});
 				}
 			}
 			renderer.render(scene, camera);
@@ -90,16 +129,52 @@
 			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 		});
 
-		hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+		hands.setOptions({
+			maxNumHands: 2,
+			modelComplexity: 1,
+			minDetectionConfidence: 0.5,
+			minTrackingConfidence: 0.5
+		});
 		hands.onResults(onResults);
 
-		const cam = new Camera(videoElement, {
-			onFrame: async () => { await hands.send({image: videoElement}); },
-			width: 1280, height: 720, facingMode: "environment"
+		const cam = new Camera(video, {
+			onFrame: async () => { await hands.send({image: video}); },
+			width: 1280,
+			height: 720
 		});
 
+		startBtn.onclick = async () => {
+			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+				const res = await DeviceOrientationEvent.requestPermission();
+				if (res === 'granted') {
+					window.addEventListener('deviceorientation', (e) => {
+						if (!isLocked) return;
+						const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+						const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+						const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+						camera.rotation.set(b, g, a);
+					});
+				}
+			}
+			isLocked = true;
+			grid.children[0].material.color.setHex(0x00ff00);
+			startBtn.style.display = "none";
+		};
+
 		init3D();
-		cam.start();
+		
+		navigator.mediaDevices.getUserMedia({ 
+			video: { facingMode: "environment", width: 1280, height: 720 } 
+		}).then((stream) => {
+			video.srcObject = stream;
+			video.onloadedmetadata = () => {
+				video.play();
+				cam.start();
+				status.innerText = "READY";
+			};
+		}).catch(e => {
+			status.innerText = "CAMERA ERROR: " + e.message;
+		});
 
 		function animate() {
 			requestAnimationFrame(animate);
