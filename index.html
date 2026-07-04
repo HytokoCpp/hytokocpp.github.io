@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v7</title>
+	<title>Vision v8</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -47,6 +47,7 @@
 		let camHelper;
 		let lastStepTime = 0;
 		let handSize = 0.15;
+		let activeLandmarks = null;
 
 		const targetPosition = new THREE.Vector3();
 
@@ -62,8 +63,7 @@
 			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
 			const material = new THREE.MeshBasicMaterial({ 
 				color: 0xffffff, 
-				transparent: true, 
-				opacity: 0.5,
+				transparent: false,
 				side: THREE.DoubleSide
 			});
 			panel = new THREE.Mesh(geometry, material);
@@ -146,27 +146,12 @@
 
 		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 		hands.onResults((results) => {
-			canvas2d.width = window.innerWidth;
-			canvas2d.height = window.innerHeight;
-			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
-			
 			isPinching = false;
+			activeLandmarks = null;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
 				const landmarks = results.multiHandLandmarks[0];
-				
-				ctx2d.fillStyle = 'rgba(0, 255, 0, 0.15)';
-				ctx2d.beginPath();
-				ctx2d.moveTo(landmarks[0].x * canvas2d.width, landmarks[0].y * canvas2d.height);
-				ctx2d.lineTo(landmarks[5].x * canvas2d.width, landmarks[5].y * canvas2d.height);
-				ctx2d.lineTo(landmarks[9].x * canvas2d.width, landmarks[9].y * canvas2d.height);
-				ctx2d.lineTo(landmarks[13].x * canvas2d.width, landmarks[13].y * canvas2d.height);
-				ctx2d.lineTo(landmarks[17].x * canvas2d.width, landmarks[17].y * canvas2d.height);
-				ctx2d.closePath();
-				ctx2d.fill();
-
-				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
-				drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
+				activeLandmarks = landmarks;
 
 				const thumb = landmarks[4];
 				const index = landmarks[8];
@@ -196,10 +181,37 @@
 			}
 		});
 
+		function drawHandOcclusion() {
+			canvas2d.width = window.innerWidth;
+			canvas2d.height = window.innerHeight;
+			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
+
+			if (!activeLandmarks) return;
+
+			ctx2d.save();
+			ctx2d.beginPath();
+			
+			ctx2d.moveTo(activeLandmarks[0].x * canvas2d.width, activeLandmarks[0].y * canvas2d.height);
+			
+			const hullIndices = [1, 2, 3, 4, 5, 8, 12, 16, 20, 17, 0];
+			for (let i = 0; i < hullIndices.length; i++) {
+				const pt = activeLandmarks[hullIndices[i]];
+				ctx2d.lineTo(pt.x * canvas2d.width, pt.y * canvas2d.height);
+			}
+			
+			ctx2d.closePath();
+			ctx2d.clip();
+			
+			ctx2d.drawImage(video, 0, 0, canvas2d.width, canvas2d.height);
+			ctx2d.restore();
+		}
+
 		function animate() {
 			requestAnimationFrame(animate);
 			
 			if (panel && isRunning) {
+				drawHandOcclusion();
+
 				const panelScreenPos = panel.position.clone().project(camera);
 				const distToPanel = Math.sqrt(Math.pow(handNDC.x - panelScreenPos.x, 2) + Math.pow(handNDC.y - panelScreenPos.y, 2));
 
@@ -225,6 +237,10 @@
 				const maxSize = 0.28;
 				const t = THREE.MathUtils.clamp((handSize - minSize) / (maxSize - minSize), 0, 1);
 				const currentDragDistance = THREE.MathUtils.lerp(3.0, 0.8, t);
+
+				const distanceToCam = panel.position.distanceTo(camera.position);
+				const dynamicScale = distanceToCam * 0.65;
+				panel.scale.set(dynamicScale, dynamicScale, 1);
 
 				debug.innerText = `STATE: ${appState}\nPINCH: ${isPinching ? "YES" : "NO"}\nDIST: ${currentDragDistance.toFixed(2)}m`;
 
