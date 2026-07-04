@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v8</title>
+	<title>Vision v5</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -43,7 +43,7 @@
 		let isRunning = false;
 		let appState = "FOLLOW";
 		let handNDC = new THREE.Vector3();
-		let isPinching = false;
+		let isFist = false;
 		let camHelper;
 		let lastStepTime = 0;
 		let handSize = 0.15;
@@ -126,7 +126,6 @@
 			
 			await startSensors();
 			init3D();
-			resize();
 			
 			camHelper = new Camera(video, {
 				onFrame: async () => { await hands.send({image: video}); },
@@ -146,7 +145,7 @@
 
 		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 		hands.onResults((results) => {
-			isPinching = false;
+			isFist = false;
 			activeLandmarks = null;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -157,12 +156,21 @@
 				const index = landmarks[8];
 				const wrist = landmarks[0];
 				const middleMCP = landmarks[9];
-				
-				const dist3D = Math.sqrt(
-					Math.pow(thumb.x - index.x, 2) + 
-					Math.pow(thumb.y - index.y, 2) + 
-					Math.pow(thumb.z - index.z, 2)
-				);
+
+				const joints = [[8, 5], [12, 9], [16, 13], [20, 17]];
+				let curledFingers = 0;
+				joints.forEach(pair => {
+					const tip = landmarks[pair[0]];
+					const mcp = landmarks[pair[1]];
+					const dist = Math.sqrt(
+						Math.pow(tip.x - mcp.x, 2) + 
+						Math.pow(tip.y - mcp.y, 2) + 
+						Math.pow(tip.z - mcp.z, 2)
+					);
+					if (dist < 0.12) curledFingers++;
+				});
+
+				isFist = curledFingers >= 3;
 
 				handSize = Math.sqrt(
 					Math.pow(wrist.x - middleMCP.x, 2) + 
@@ -174,10 +182,6 @@
 				const handY = (thumb.y + index.y) / 2;
 				
 				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
-
-				if (dist3D < 0.13) {
-					isPinching = true;
-				}
 			}
 		});
 
@@ -188,22 +192,43 @@
 
 			if (!activeLandmarks) return;
 
-			ctx2d.save();
+			ctx2d.fillStyle = '#ffffff';
+			ctx2d.strokeStyle = '#ffffff';
+			ctx2d.lineCap = 'round';
+			ctx2d.lineJoin = 'round';
+
 			ctx2d.beginPath();
-			
 			ctx2d.moveTo(activeLandmarks[0].x * canvas2d.width, activeLandmarks[0].y * canvas2d.height);
-			
-			const hullIndices = [1, 2, 3, 4, 5, 8, 12, 16, 20, 17, 0];
-			for (let i = 0; i < hullIndices.length; i++) {
-				const pt = activeLandmarks[hullIndices[i]];
-				ctx2d.lineTo(pt.x * canvas2d.width, pt.y * canvas2d.height);
-			}
-			
+			ctx2d.lineTo(activeLandmarks[5].x * canvas2d.width, activeLandmarks[5].y * canvas2d.height);
+			ctx2d.lineTo(activeLandmarks[9].x * canvas2d.width, activeLandmarks[9].y * canvas2d.height);
+			ctx2d.lineTo(activeLandmarks[13].x * canvas2d.width, activeLandmarks[13].y * canvas2d.height);
+			ctx2d.lineTo(activeLandmarks[17].x * canvas2d.width, activeLandmarks[17].y * canvas2d.height);
 			ctx2d.closePath();
-			ctx2d.clip();
-			
+			ctx2d.fill();
+
+			ctx2d.lineWidth = 45;
+			const chains = [
+				[0, 1, 2, 3, 4],
+				[0, 5, 6, 7, 8],
+				[9, 10, 11, 12],
+				[13, 14, 15, 16],
+				[0, 17, 18, 19, 20]
+			];
+			chains.forEach(chain => {
+				ctx2d.beginPath();
+				ctx2d.moveTo(activeLandmarks[chain[0]].x * canvas2d.width, activeLandmarks[chain[0]].y * canvas2d.height);
+				for (let i = 1; i < chain.length; i++) {
+					ctx2d.lineTo(activeLandmarks[chain[i]].x * canvas2d.width, activeLandmarks[chain[i]].y * canvas2d.height);
+				}
+				ctx2d.stroke();
+			});
+
+			ctx2d.globalCompositeOperation = 'source-in';
 			ctx2d.drawImage(video, 0, 0, canvas2d.width, canvas2d.height);
-			ctx2d.restore();
+
+			ctx2d.globalCompositeOperation = 'source-over';
+			drawConnectors(ctx2d, activeLandmarks, HAND_CONNECTIONS, {color: 'rgba(0, 255, 0, 0.7)', lineWidth: 3});
+			drawLandmarks(ctx2d, activeLandmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
 		}
 
 		function animate() {
@@ -215,18 +240,8 @@
 				const panelScreenPos = panel.position.clone().project(camera);
 				const distToPanel = Math.sqrt(Math.pow(handNDC.x - panelScreenPos.x, 2) + Math.pow(handNDC.y - panelScreenPos.y, 2));
 
-				const isNearGrabArea = Math.abs(handNDC.x - panelScreenPos.x) < 0.6 && (panelScreenPos.y - handNDC.y) > -0.1 && (panelScreenPos.y - handNDC.y) < 0.6;
-
-				if (isPinching) {
-					if (appState === "FOLLOW" && isNearGrabArea) {
-						appState = "DRAG";
-					} else if (appState === "STATIONARY") {
-						if (isNearGrabArea) {
-							appState = "DRAG";
-						} else {
-							appState = "FOLLOW";
-						}
-					}
+				if (isFist) {
+					appState = "DRAG";
 				} else {
 					if (appState === "DRAG") {
 						appState = "STATIONARY";
@@ -242,7 +257,7 @@
 				const dynamicScale = distanceToCam * 0.65;
 				panel.scale.set(dynamicScale, dynamicScale, 1);
 
-				debug.innerText = `STATE: ${appState}\nPINCH: ${isPinching ? "YES" : "NO"}\nDIST: ${currentDragDistance.toFixed(2)}m`;
+				debug.innerText = `STATE: ${appState}\nGRAB: ${isFist ? "FIST" : "OPEN"}\nDIST: ${distToPanel.toFixed(2)}`;
 
 				if (appState === "FOLLOW") {
 					targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
