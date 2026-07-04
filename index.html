@@ -1,146 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision AR Pro</title>
-	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-	<style>
-		body { margin: 0; background: #000; overflow: hidden; position: fixed; width: 100vw; height: 100vh; font-family: sans-serif; }
-		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-		canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-		#canvas_3d { z-index: 2; }
-		#canvas_2d { z-index: 3; }
-		#ui { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 100; width: 100%; text-align: center; }
-		.btn { background: #00ff00; color: #000; border: none; padding: 20px 40px; border-radius: 50px; font-weight: bold; font-size: 18px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
-		#status { position: absolute; top: 40px; width: 100%; text-align: center; color: #fff; z-index: 101; font-weight: bold; text-shadow: 0 2px 10px #000; }
-	</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Vision SLAM AR</title>
+    <!-- Основные движки для "Angry Birds" трекинга -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+    <!-- Трекинг рук -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #ui-overlay {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            z-index: 1000; color: white; font-family: sans-serif; pointer-events: none;
+        }
+        .instruction { background: rgba(0,0,0,0.6); padding: 10px; border-radius: 20px; }
+        #hand-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 500; pointer-events: none;
+        }
+    </style>
 </head>
 <body>
 
-	<div id="status">AIM AT THE FLOOR</div>
-	<video id="input_video" playsinline autoplay muted></video>
-	<canvas id="canvas_3d"></canvas>
-	<canvas id="canvas_2d"></canvas>
+    <div id="ui-overlay">
+        <div class="instruction" id="msg">НАВЕДИ НА ПОЛ И ТАПНИ</div>
+    </div>
 
-	<div id="ui">
-		<button class="btn" id="confirmBtn">PLACE LEVEL</button>
-	</div>
+    <canvas id="hand-canvas"></canvas>
 
-	<script type="module">
-		const video = document.getElementById('input_video');
-		const canvas2d = document.getElementById('canvas_2d');
-		const canvas3d = document.getElementById('canvas_3d');
-		const confirmBtn = document.getElementById('confirmBtn');
-		const status = document.getElementById('status');
-		const ctx2d = canvas2d.getContext('2d');
+    <!-- Сцена AR -->
+    <a-scene mindar-image="imageTargetSrc: ; autoStart: true; uiScanning: no;" 
+             embedded color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" 
+             vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: true">
+        
+        <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
 
-		let scene, camera, renderer, grid, ring;
-		let isAnchored = false;
-		let floorHeight = -1.6; // Средний рост человека с телефоном
+        <!-- Этот объект появится там, где ты тапнешь -->
+        <a-entity id="anchor">
+            <a-grid id="floor-grid" static-body geometry="primitive: plane; width: 10; height: 10" 
+                    rotation="-90 0 0" material="src: url(https://base-ar.github.io/assets/grid.png); transparent: true; opacity: 0.5" 
+                    visible="false"></a-grid>
+            
+            <a-box id="center-cube" position="0 0.2 0" scale="0.4 0.4 0.4" 
+                   material="color: #00ff00; wireframe: true" visible="false"></a-box>
+        </a-entity>
+    </a-scene>
 
-		function init3D() {
-			scene = new THREE.Scene();
-			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-			renderer = new THREE.WebGLRenderer({ canvas: canvas3d, alpha: true, antialias: true });
-			renderer.setSize(window.innerWidth, window.innerHeight);
-			renderer.setPixelRatio(window.devicePixelRatio);
+    <script type="module">
+        const anchor = document.querySelector('#anchor');
+        const grid = document.querySelector('#floor-grid');
+        const cube = document.querySelector('#center-cube');
+        const msg = document.querySelector('#msg');
+        const handCanvas = document.getElementById('hand-canvas');
+        const ctx = handCanvas.getContext('2d');
 
-			// Сетка как в Angry Birds
-			grid = new THREE.GridHelper(20, 40, 0x00ff00, 0x113311);
-			grid.position.y = floorHeight;
-			grid.visible = false;
-			scene.add(grid);
+        // ТАП ПО ЭКРАНУ СТАВИТ УРОВЕНЬ НА ПОЛ
+        document.body.onclick = () => {
+            // Фиксируем текущую позицию камеры как точку отсчета
+            grid.setAttribute('visible', 'true');
+            cube.setAttribute('visible', 'true');
+            msg.innerText = "УРОВЕНЬ УСТАНОВЛЕН";
+            setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        };
 
-			// Кольцо для выбора места
-			const ringGeo = new THREE.RingGeometry(0.3, 0.35, 32);
-			const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
-			ring = new THREE.Mesh(ringGeo, ringMat);
-			ring.rotation.x = Math.PI / 2;
-			ring.position.set(0, floorHeight, -3);
-			scene.add(ring);
-		}
+        // ТРЕКИНГ РУК (Медиапайп)
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
 
-		async function startSensors() {
-			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-				const res = await DeviceOrientationEvent.requestPermission();
-				if (res !== 'granted') return;
-			}
-			window.addEventListener('deviceorientation', (e) => {
-				const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
-				const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
-				const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
 
-				// Вращаем камеру
-				camera.rotation.set(beta, gamma, alpha, 'YXZ');
+        hands.onResults((results) => {
+            handCanvas.width = window.innerWidth;
+            handCanvas.height = window.innerHeight;
+            ctx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+            
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                    drawLandmarks(ctx, landmarks, {color: '#FFFFFF', lineWidth: 1, radius: 3});
+                }
+            }
+        });
 
-				if (!isAnchored) {
-					// Кольцо всегда "прилипает" к воображаемому полу впереди
-					const dist = 3; 
-					ring.position.z = -Math.cos(beta) * dist;
-					ring.position.y = floorHeight;
-					
-					if (e.beta > 45) {
-						status.innerText = "READY TO PLACE";
-						ring.material.color.setHex(0x00ff00);
-					} else {
-						status.innerText = "TILT DOWN TO FIND FLOOR";
-						ring.material.color.setHex(0xff0000);
-					}
-				}
-			});
-		}
+        // Запуск камеры для рук (берем поток из сцены A-Frame)
+        setTimeout(() => {
+            const video = document.querySelector('video');
+            if (video) {
+                const camera = new Camera(video, {
+                    onFrame: async () => { await hands.send({image: video}); }
+                });
+                camera.start();
+            }
+        }, 3000);
 
-		confirmBtn.onclick = async () => {
-			await startSensors();
-			if (!isAnchored) {
-				isAnchored = true;
-				grid.visible = true;
-				ring.visible = false;
-				status.innerText = "VISION ONLINE";
-				confirmBtn.style.display = "none";
-			}
-		};
-
-		const hands = new Hands({
-			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-		});
-		hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
-		hands.onResults((results) => {
-			canvas2d.width = window.innerWidth;
-			canvas2d.height = window.innerHeight;
-			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
-			if (results.multiHandLandmarks) {
-				for (const landmarks of results.multiHandLandmarks) {
-					drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 3});
-					drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
-				}
-			}
-			renderer.render(scene, camera);
-		});
-
-		const camHelper = new Camera(video, {
-			onFrame: async () => { await hands.send({image: video}); },
-			width: 1280, height: 720, facingMode: "environment"
-		});
-
-		init3D();
-		camHelper.start();
-
-		function animate() {
-			requestAnimationFrame(animate);
-			renderer.render(scene, camera);
-		}
-		animate();
-
-		window.addEventListener('resize', () => {
-			camera.aspect = window.innerWidth / window.innerHeight;
-			camera.updateProjectionMatrix();
-			renderer.setSize(window.innerWidth, window.innerHeight);
-		});
-	</script>
+    </script>
 </body>
 </html>
