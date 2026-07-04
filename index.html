@@ -57,7 +57,6 @@
 			font-family: sans-serif;
 			font-weight: bold;
 			font-size: 16px;
-			box-shadow: 0 4px 15px rgba(0,0,0,0.5);
 		}
 		#status {
 			position: absolute;
@@ -73,7 +72,7 @@
 </head>
 <body>
 
-	<div id="status">LOADING...</div>
+	<div id="status">INIT...</div>
 	<video id="input_video" playsinline autoplay muted></video>
 	<canvas id="canvas_3d"></canvas>
 	<canvas id="canvas_2d"></canvas>
@@ -99,8 +98,10 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
-			cube = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
+			cube = new THREE.Mesh(
+				new THREE.BoxGeometry(0.3, 0.3, 0.3),
+				new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+			);
 			cube.position.set(0, 0, -1.5);
 			scene.add(cube);
 
@@ -110,8 +111,7 @@
 		}
 
 		function onResults(results) {
-			status.innerText = results.multiHandLandmarks?.length > 0 ? "TRACKING" : "SCANNING";
-			
+			status.innerText = results.multiHandLandmarks?.length > 0 ? "TRACKING" : "READY";
 			canvas2d.width = window.innerWidth;
 			canvas2d.height = window.innerHeight;
 			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
@@ -137,12 +137,6 @@
 		});
 		hands.onResults(onResults);
 
-		const cam = new Camera(video, {
-			onFrame: async () => { await hands.send({image: video}); },
-			width: 1280,
-			height: 720
-		});
-
 		startBtn.onclick = async () => {
 			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
 				const res = await DeviceOrientationEvent.requestPermission();
@@ -163,17 +157,26 @@
 
 		init3D();
 		
+		const cameraHelper = new Camera(video, {
+			onFrame: async () => {
+				await hands.send({image: video});
+			},
+			width: 1280,
+			height: 720,
+			facingMode: "environment"
+		});
+
 		navigator.mediaDevices.getUserMedia({ 
-			video: { facingMode: "environment", width: 1280, height: 720 } 
+			video: { 
+				facingMode: "environment",
+				width: { ideal: 1280 },
+				height: { ideal: 720 }
+			} 
 		}).then((stream) => {
 			video.srcObject = stream;
-			video.onloadedmetadata = () => {
-				video.play();
-				cam.start();
-				status.innerText = "READY";
-			};
+			cameraHelper.start();
 		}).catch(e => {
-			status.innerText = "CAMERA ERROR: " + e.message;
+			status.innerText = "ERR: " + e.message;
 		});
 
 		function animate() {
