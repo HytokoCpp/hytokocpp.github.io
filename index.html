@@ -37,6 +37,10 @@
 
 		let scene, camera, renderer, panel;
 		let isRunning = false;
+		let appState = "FOLLOW";
+		let handNDC = new THREE.Vector3();
+		let isPinching = false;
+
 		const targetPosition = new THREE.Vector3();
 
 		function init3D() {
@@ -46,11 +50,22 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.01);
-			const material = new THREE.MeshNormalMaterial({ wireframe: true });
+			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
+			const material = new THREE.MeshStandardMaterial({ 
+				color: 0xffffff, 
+				roughness: 0.9, 
+				metalness: 0.1, 
+				transparent: true, 
+				opacity: 0.85 
+			});
 			panel = new THREE.Mesh(geometry, material);
 			panel.position.set(0, 0, -1.5);
 			scene.add(panel);
+
+			const light = new THREE.DirectionalLight(0xffffff, 1.5);
+			light.position.set(1, 1, 1).normalize();
+			scene.add(light);
+			scene.add(new THREE.AmbientLight(0x666666));
 		}
 
 		async function startSensors() {
@@ -76,15 +91,31 @@
 			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 		});
 
-		hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 		hands.onResults((results) => {
 			canvas2d.width = window.innerWidth;
 			canvas2d.height = window.innerHeight;
 			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
-			if (results.multiHandLandmarks) {
-				for (const landmarks of results.multiHandLandmarks) {
-					drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
-					drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
+			
+			isPinching = false;
+
+			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+				const landmarks = results.multiHandLandmarks[0];
+				
+				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
+				drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
+
+				const thumb = landmarks[4];
+				const index = landmarks[8];
+				const dist = Math.sqrt(Math.pow(thumb.x - index.x, 2) + Math.pow(thumb.y - index.y, 2));
+
+				const handX = (thumb.x + index.x) / 2;
+				const handY = (thumb.y + index.y) / 2;
+				
+				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
+
+				if (dist < 0.08) {
+					isPinching = true;
 				}
 			}
 			renderer.render(scene, camera);
@@ -104,9 +135,33 @@
 			requestAnimationFrame(animate);
 			
 			if (panel && isRunning) {
-				targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
-				panel.position.lerp(targetPosition, 0.05);
-				panel.quaternion.slerp(camera.quaternion, 0.05);
+				const panelScreenPos = panel.position.clone().project(camera);
+				const distToPanel = Math.sqrt(Math.pow(handNDC.x - panelScreenPos.x, 2) + Math.pow(handNDC.y - panelScreenPos.y, 2));
+
+				if (isPinching) {
+					if (appState === "FOLLOW" || (appState === "STATIONARY" && distToPanel < 0.4)) {
+						appState = "DRAG";
+					}
+				} else {
+					if (appState === "DRAG") {
+						appState = "STATIONARY";
+					}
+				}
+
+				if (appState === "FOLLOW") {
+					targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
+					panel.position.lerp(targetPosition, 0.05);
+					panel.quaternion.slerp(camera.quaternion, 0.05);
+				} else if (appState === "DRAG") {
+					const tempVec = handNDC.clone();
+					tempVec.z = 0.5;
+					tempVec.unproject(camera);
+					const dir = tempVec.sub(camera.position).normalize();
+					const dragTarget = camera.position.clone().add(dir.multiplyScalar(1.5));
+					
+					panel.position.lerp(dragTarget, 0.1);
+					panel.quaternion.slerp(camera.quaternion, 0.1);
+				}
 			}
 
 			renderer.render(scene, camera);
