@@ -3,31 +3,31 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision AR</title>
+	<title>Vision AR Pro</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 	<style>
-		body { margin: 0; background: #000; overflow: hidden; width: 100vw; height: 100vh; position: fixed; }
+		body { margin: 0; background: #000; overflow: hidden; position: fixed; width: 100vw; height: 100vh; font-family: sans-serif; }
 		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
 		canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 		#canvas_3d { z-index: 2; }
 		#canvas_2d { z-index: 3; }
-		#ui { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 100; text-align: center; width: 100%; }
-		.btn { background: #00ff00; color: #000; border: none; padding: 20px 40px; border-radius: 50px; font-family: sans-serif; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 0 20px rgba(0,255,0,0.4); }
-		#status { position: absolute; top: 30px; width: 100%; text-align: center; color: #fff; z-index: 101; font-family: monospace; font-size: 18px; text-shadow: 0 0 10px #000; }
+		#ui { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 100; width: 100%; text-align: center; }
+		.btn { background: #00ff00; color: #000; border: none; padding: 20px 40px; border-radius: 50px; font-weight: bold; font-size: 18px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
+		#status { position: absolute; top: 40px; width: 100%; text-align: center; color: #fff; z-index: 101; font-weight: bold; text-shadow: 0 2px 10px #000; }
 	</style>
 </head>
 <body>
 
-	<div id="status">LOOK AT THE FLOOR</div>
+	<div id="status">AIM AT THE FLOOR</div>
 	<video id="input_video" playsinline autoplay muted></video>
 	<canvas id="canvas_3d"></canvas>
 	<canvas id="canvas_2d"></canvas>
 
 	<div id="ui">
-		<button class="btn" id="confirmBtn">CONFIRM FLOOR</button>
+		<button class="btn" id="confirmBtn">PLACE LEVEL</button>
 	</div>
 
 	<script type="module">
@@ -38,9 +38,9 @@
 		const status = document.getElementById('status');
 		const ctx2d = canvas2d.getContext('2d');
 
-		let scene, camera, renderer, cube, grid;
+		let scene, camera, renderer, grid, ring;
 		let isAnchored = false;
-		let currentBeta = 0, currentGamma = 0, currentAlpha = 0;
+		let floorHeight = -1.6; // Средний рост человека с телефоном
 
 		function init3D() {
 			scene = new THREE.Scene();
@@ -49,19 +49,67 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			grid = new THREE.GridHelper(20, 40, 0x00ff00, 0x00ff00);
+			// Сетка как в Angry Birds
+			grid = new THREE.GridHelper(20, 40, 0x00ff00, 0x113311);
+			grid.position.y = floorHeight;
 			grid.visible = false;
 			scene.add(grid);
 
-			cube = new THREE.Mesh(
-				new THREE.BoxGeometry(0.4, 0.4, 0.4),
-				new THREE.MeshNormalMaterial({ wireframe: true })
-			);
-			cube.visible = false;
-			scene.add(cube);
+			// Кольцо для выбора места
+			const ringGeo = new THREE.RingGeometry(0.3, 0.35, 32);
+			const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+			ring = new THREE.Mesh(ringGeo, ringMat);
+			ring.rotation.x = Math.PI / 2;
+			ring.position.set(0, floorHeight, -3);
+			scene.add(ring);
 		}
 
-		function onResults(results) {
+		async function startSensors() {
+			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+				const res = await DeviceOrientationEvent.requestPermission();
+				if (res !== 'granted') return;
+			}
+			window.addEventListener('deviceorientation', (e) => {
+				const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+				const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+				const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+
+				// Вращаем камеру
+				camera.rotation.set(beta, gamma, alpha, 'YXZ');
+
+				if (!isAnchored) {
+					// Кольцо всегда "прилипает" к воображаемому полу впереди
+					const dist = 3; 
+					ring.position.z = -Math.cos(beta) * dist;
+					ring.position.y = floorHeight;
+					
+					if (e.beta > 45) {
+						status.innerText = "READY TO PLACE";
+						ring.material.color.setHex(0x00ff00);
+					} else {
+						status.innerText = "TILT DOWN TO FIND FLOOR";
+						ring.material.color.setHex(0xff0000);
+					}
+				}
+			});
+		}
+
+		confirmBtn.onclick = async () => {
+			await startSensors();
+			if (!isAnchored) {
+				isAnchored = true;
+				grid.visible = true;
+				ring.visible = false;
+				status.innerText = "VISION ONLINE";
+				confirmBtn.style.display = "none";
+			}
+		};
+
+		const hands = new Hands({
+			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+		});
+		hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+		hands.onResults((results) => {
 			canvas2d.width = window.innerWidth;
 			canvas2d.height = window.innerHeight;
 			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
@@ -72,71 +120,18 @@
 				}
 			}
 			renderer.render(scene, camera);
-		}
-
-		const hands = new Hands({
-			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 		});
 
-		hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
-		hands.onResults(onResults);
-
-		const cameraHelper = new Camera(video, {
+		const camHelper = new Camera(video, {
 			onFrame: async () => { await hands.send({image: video}); },
 			width: 1280, height: 720, facingMode: "environment"
 		});
 
-		async function startSensors() {
-			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-				const res = await DeviceOrientationEvent.requestPermission();
-				if (res !== 'granted') return;
-			}
-			window.addEventListener('deviceorientation', (e) => {
-				currentAlpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
-				currentBeta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
-				currentGamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-
-				if (!isAnchored) {
-					if (e.beta > 40) {
-						grid.visible = true;
-						status.innerText = "FLOOR DETECTED";
-						status.style.color = "#0f0";
-						grid.position.set(0, -2, -3);
-						grid.rotation.x = -Math.PI/2;
-					} else {
-						grid.visible = false;
-						status.innerText = "TILT PHONE DOWN";
-						status.style.color = "#fff";
-					}
-				} else {
-					camera.rotation.set(currentBeta, currentGamma, currentAlpha, 'YXZ');
-				}
-			});
-		}
-
-		confirmBtn.onclick = () => {
-			if (grid.visible) {
-				isAnchored = true;
-				cube.visible = true;
-				cube.position.set(0, -1.8, -3);
-				status.innerText = "VISION READY";
-				confirmBtn.style.display = "none";
-			}
-		};
-
 		init3D();
-		startSensors();
-		
-		navigator.mediaDevices.getUserMedia({ 
-			video: { facingMode: "environment", width: 1280, height: 720 } 
-		}).then((stream) => {
-			video.srcObject = stream;
-			cameraHelper.start();
-		});
+		camHelper.start();
 
 		function animate() {
 			requestAnimationFrame(animate);
-			if (cube.visible) cube.rotation.y += 0.02;
 			renderer.render(scene, camera);
 		}
 		animate();
