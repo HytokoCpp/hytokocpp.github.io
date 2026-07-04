@@ -16,30 +16,28 @@
 		#canvas_2d { z-index: 3; }
 		#ui { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 100; text-align: center; width: 100%; }
 		.btn { background: #00ff00; color: #000; border: none; padding: 20px 40px; border-radius: 50px; font-weight: bold; font-size: 18px; box-shadow: 0 0 20px rgba(0,255,0,0.5); }
-		#status { position: absolute; top: 30px; width: 100%; text-align: center; color: #fff; z-index: 101; font-family: monospace; font-size: 18px; text-shadow: 0 0 10px #000; }
 	</style>
 </head>
 <body>
 
-	<div id="status">POINT TO FLOOR & FIX</div>
 	<video id="input_video" playsinline autoplay muted></video>
 	<canvas id="canvas_3d"></canvas>
 	<canvas id="canvas_2d"></canvas>
 
 	<div id="ui">
-		<button class="btn" id="lockBtn">FIX WORLD POSITION</button>
+		<button class="btn" id="startBtn">START SYSTEM</button>
 	</div>
 
 	<script type="module">
 		const video = document.getElementById('input_video');
 		const canvas2d = document.getElementById('canvas_2d');
 		const canvas3d = document.getElementById('canvas_3d');
-		const lockBtn = document.getElementById('lockBtn');
-		const status = document.getElementById('status');
+		const startBtn = document.getElementById('startBtn');
 		const ctx2d = canvas2d.getContext('2d');
 
-		let scene, camera, renderer, world, grid, cube;
-		let isLocked = false;
+		let scene, camera, renderer, panel;
+		let isRunning = false;
+		const targetPosition = new THREE.Vector3();
 
 		function init3D() {
 			scene = new THREE.Scene();
@@ -48,20 +46,11 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			world = new THREE.Group();
-			scene.add(world);
-
-			grid = new THREE.GridHelper(50, 100, 0x00ff00, 0x222222);
-			grid.position.y = -1.6;
-			world.add(grid);
-
-			cube = new THREE.Mesh(
-				new THREE.BoxGeometry(0.5, 0.5, 0.5),
-				new THREE.MeshNormalMaterial({ wireframe: true })
-			);
-			cube.position.set(0, -1.3, -3);
-			world.add(cube);
-			world.visible = false;
+			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.01);
+			const material = new THREE.MeshNormalMaterial({ wireframe: true });
+			panel = new THREE.Mesh(geometry, material);
+			panel.position.set(0, 0, -1.5);
+			scene.add(panel);
 		}
 
 		async function startSensors() {
@@ -77,12 +66,10 @@
 			});
 		}
 
-		lockBtn.onclick = async () => {
+		startBtn.onclick = async () => {
 			await startSensors();
-			isLocked = true;
-			world.visible = true;
-			lockBtn.style.display = "none";
-			status.innerText = "VISION READY";
+			isRunning = true;
+			startBtn.style.display = "none";
 		};
 
 		const hands = new Hands({
@@ -115,7 +102,13 @@
 
 		function animate() {
 			requestAnimationFrame(animate);
-			if (cube) cube.rotation.y += 0.02;
+			
+			if (panel && isRunning) {
+				targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
+				panel.position.lerp(targetPosition, 0.05);
+				panel.quaternion.slerp(camera.quaternion, 0.05);
+			}
+
 			renderer.render(scene, camera);
 		}
 		animate();
