@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v3</title>
+	<title>Vision v4</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -39,15 +39,17 @@
 		const debug = document.getElementById('debug');
 		const ctx2d = canvas2d.getContext('2d');
 
-		let scene, camera, renderer, panel;
+		let scene, camera, renderer, panel, drawCanvas, drawCtx, panelTexture;
 		let isRunning = false;
 		let appState = "FOLLOW";
 		let handNDC = new THREE.Vector3();
+		let indexNDC = new THREE.Vector2();
 		let isPinching = false;
 		let camHelper;
 		let lastStepTime = 0;
 
 		const targetPosition = new THREE.Vector3();
+		const raycaster = new THREE.Raycaster();
 
 		function init3D() {
 			scene = new THREE.Scene();
@@ -58,9 +60,18 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
+			drawCanvas = document.createElement('canvas');
+			drawCanvas.width = 1024;
+			drawCanvas.height = 1024;
+			drawCtx = drawCanvas.getContext('2d');
+			drawCtx.fillStyle = '#ffffff';
+			drawCtx.fillRect(0, 0, 1024, 1024);
+
+			panelTexture = new THREE.CanvasTexture(drawCanvas);
+
 			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
 			const material = new THREE.MeshBasicMaterial({ 
-				color: 0xffffff, 
+				map: panelTexture,
 				transparent: true, 
 				opacity: 0.85,
 				side: THREE.DoubleSide
@@ -169,6 +180,7 @@
 				const handY = (thumb.y + index.y) / 2;
 				
 				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
+				indexNDC.set((index.x * 2) - 1, -(index.y * 2) + 1);
 
 				if (dist3D < 0.12) {
 					isPinching = true;
@@ -192,6 +204,21 @@
 				} else {
 					if (appState === "DRAG") {
 						appState = "STATIONARY";
+					}
+				}
+
+				if (appState === "STATIONARY" && !isPinching) {
+					raycaster.setFromCamera(indexNDC, camera);
+					const intersects = raycaster.intersectObject(panel);
+					if (intersects.length > 0) {
+						const uv = intersects[0].uv;
+						const x = uv.x * drawCanvas.width;
+						const y = (1 - uv.y) * drawCanvas.height;
+						drawCtx.fillStyle = '#000000';
+						drawCtx.beginPath();
+						drawCtx.arc(x, y, 12, 0, Math.PI * 2);
+						drawCtx.fill();
+						panelTexture.needsUpdate = true;
 					}
 				}
 
