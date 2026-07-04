@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v9</title>
+	<title>Vision v10</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -42,14 +42,16 @@
 		let scene, camera, renderer, panel;
 		let isRunning = false;
 		let appState = "FOLLOW";
-		let handNDC = new THREE.Vector3();
+		let handNDC = new THREE.Vector2();
 		let isFist = false;
 		let camHelper;
 		let lastStepTime = 0;
 		let handSize = 0.15;
 		let activeLandmarks = null;
+		let activeResultsImage = null;
 
 		const targetPosition = new THREE.Vector3();
+		const raycaster = new THREE.Raycaster();
 
 		function init3D() {
 			scene = new THREE.Scene();
@@ -147,10 +149,12 @@
 		hands.onResults((results) => {
 			isFist = false;
 			activeLandmarks = null;
+			activeResultsImage = null;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
 				const landmarks = results.multiHandLandmarks[0];
 				activeLandmarks = landmarks;
+				activeResultsImage = results.image;
 
 				const thumb = landmarks[4];
 				const index = landmarks[8];
@@ -181,7 +185,7 @@
 				const handX = (thumb.x + index.x) / 2;
 				const handY = (thumb.y + index.y) / 2;
 				
-				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
+				handNDC.set((handX * 2) - 1, -(handY * 2) + 1);
 			}
 		});
 
@@ -190,7 +194,7 @@
 			canvas2d.height = window.innerHeight;
 			ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
 
-			if (!activeLandmarks) return;
+			if (!activeLandmarks || !activeResultsImage) return;
 
 			ctx2d.fillStyle = '#ffffff';
 			ctx2d.strokeStyle = '#ffffff';
@@ -224,7 +228,7 @@
 			});
 
 			ctx2d.globalCompositeOperation = 'source-in';
-			ctx2d.drawImage(video, 0, 0, canvas2d.width, canvas2d.height);
+			ctx2d.drawImage(activeResultsImage, 0, 0, canvas2d.width, canvas2d.height);
 
 			ctx2d.globalCompositeOperation = 'source-over';
 			drawConnectors(ctx2d, activeLandmarks, HAND_CONNECTIONS, {color: 'rgba(0, 255, 0, 0.7)', lineWidth: 3});
@@ -264,9 +268,8 @@
 					panel.position.lerp(targetPosition, 0.05);
 					panel.quaternion.slerp(camera.quaternion, 0.05);
 				} else if (appState === "DRAG") {
-					const tempVec = handNDC.clone();
-					tempVec.unproject(camera);
-					const dir = tempVec.sub(camera.position).normalize();
+					raycaster.setFromCamera(handNDC, camera);
+					const dir = raycaster.ray.direction;
 					const dragTarget = camera.position.clone().add(dir.multiplyScalar(currentDragDistance));
 					
 					panel.position.lerp(dragTarget, 0.1);
