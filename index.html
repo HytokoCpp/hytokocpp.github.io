@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<title>Vision AR</title>
+	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+	<style>
+		body { margin: 0; background: #000; overflow: hidden; }
+		canvas { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
+		#ui { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 100; }
+		.btn { background: #00ff00; border: none; padding: 15px 30px; border-radius: 30px; font-weight: bold; font-size: 16px; }
+	</style>
+</head>
+<body>
+
+	<div id="ui">
+		<button class="btn" id="lockBtn">SET CENTER</button>
+	</div>
+	<video id="input_video" playsinline style="display:none"></video>
+
+	<script type="module">
+		const videoElement = document.getElementById('input_video');
+		const lockBtn = document.getElementById('lockBtn');
+		let scene, camera, renderer, cube, grid;
+		let isLocked = false;
+
+		function init3D() {
+			scene = new THREE.Scene();
+			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+			renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.setPixelRatio(window.devicePixelRatio);
+			document.body.appendChild(renderer.domElement);
+
+			const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+			const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+			cube = new THREE.Mesh(geo, mat);
+			cube.position.set(0, 0, -1);
+			scene.add(cube);
+
+			grid = new THREE.GridHelper(10, 20, 0xff0000, 0x444444);
+			grid.position.y = -0.5;
+			scene.add(grid);
+			
+			scene.add(new THREE.AmbientLight(0xffffff, 1));
+		}
+
+		lockBtn.onclick = () => {
+			isLocked = true;
+			grid.children[0].material.color.setHex(0x00ff00);
+			lockBtn.style.background = "#555";
+			lockBtn.innerText = "LOCKED";
+		};
+
+		function onResults(results) {
+			const ctx = renderer.domElement.getContext('2d');
+			renderer.autoClear = false;
+			renderer.clear();
+			renderer.render(scene, camera);
+			
+			if (results.multiHandLandmarks) {
+				for (const landmarks of results.multiHandLandmarks) {
+					drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 2});
+				}
+			}
+		}
+
+		const hands = new Hands({
+			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+		});
+
+		hands.setOptions({
+			maxNumHands: 2,
+			modelComplexity: 1,
+			minDetectionConfidence: 0.5,
+			minTrackingConfidence: 0.5
+		});
+
+		hands.onResults(onResults);
+
+		const cam = new Camera(videoElement, {
+			onFrame: async () => { await hands.send({image: videoElement}); },
+			width: 1280, height: 720, facingMode: "environment"
+		});
+
+		init3D();
+		cam.start();
+
+		window.addEventListener('deviceorientation', (e) => {
+			if (!isLocked) return;
+			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+			camera.rotation.set(b, g, a);
+		});
+
+		function animate() {
+			requestAnimationFrame(animate);
+			cube.rotation.y += 0.01;
+			renderer.render(scene, camera);
+		}
+		animate();
+	</script>
+</body>
+</html>
