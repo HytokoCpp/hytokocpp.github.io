@@ -3,23 +3,25 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-	<title>Vision v2</title>
+	<title>Vision v3</title>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 	<style>
 		body { margin: 0; background: #000; overflow: hidden; position: fixed; width: 100vw; height: 100vh; }
-		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
 		canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 		#canvas_3d { z-index: 2; }
 		#canvas_2d { z-index: 3; }
-		#ui { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 100; text-align: center; width: 100%; }
-		.btn { background: #00ff00; color: #000; border: none; padding: 20px 40px; border-radius: 50px; font-weight: bold; font-size: 18px; box-shadow: 0 0 20px rgba(0,255,0,0.5); }
+		#ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; z-index: 100; background: #000; }
+		.btn { background: #00ff00; color: #000; border: none; padding: 25px 50px; border-radius: 50px; font-weight: bold; font-size: 20px; cursor: pointer; }
+		#debug { position: absolute; top: 20px; left: 20px; color: #00ff00; font-family: monospace; z-index: 101; font-size: 14px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; pointer-events: none; display: none; }
 	</style>
 </head>
 <body>
 
+	<div id="debug">DEBUG: READY</div>
 	<video id="input_video" playsinline autoplay muted></video>
 	<canvas id="canvas_3d"></canvas>
 	<canvas id="canvas_2d"></canvas>
@@ -33,6 +35,8 @@
 		const canvas2d = document.getElementById('canvas_2d');
 		const canvas3d = document.getElementById('canvas_3d');
 		const startBtn = document.getElementById('startBtn');
+		const ui = document.getElementById('ui');
+		const debug = document.getElementById('debug');
 		const ctx2d = canvas2d.getContext('2d');
 
 		let scene, camera, renderer, panel;
@@ -40,6 +44,7 @@
 		let appState = "FOLLOW";
 		let handNDC = new THREE.Vector3();
 		let isPinching = false;
+		let camHelper;
 
 		const targetPosition = new THREE.Vector3();
 
@@ -51,47 +56,60 @@
 			renderer.setPixelRatio(window.devicePixelRatio);
 
 			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
-			const material = new THREE.MeshStandardMaterial({ 
+			const material = new THREE.MeshBasicMaterial({ 
 				color: 0xffffff, 
-				roughness: 0.9, 
-				metalness: 0.1, 
 				transparent: true, 
-				opacity: 0.85 
+				opacity: 0.9,
+				side: THREE.DoubleSide
 			});
 			panel = new THREE.Mesh(geometry, material);
 			panel.position.set(0, 0, -1.5);
 			scene.add(panel);
-
-			const light = new THREE.DirectionalLight(0xffffff, 1.5);
-			light.position.set(1, 1, 1).normalize();
-			scene.add(light);
-			scene.add(new THREE.AmbientLight(0x666666));
 		}
 
 		async function startSensors() {
 			if (typeof DeviceOrientationEvent.requestPermission === 'function') {
 				const res = await DeviceOrientationEvent.requestPermission();
-				if (res !== 'granted') return;
+				if (res === 'granted') {
+					window.addEventListener('deviceorientation', handleOrientation);
+				}
+			} else {
+				window.addEventListener('deviceorientation', handleOrientation);
 			}
-			window.addEventListener('deviceorientation', (e) => {
-				const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
-				const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
-				const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-				camera.rotation.set(b, g, a, 'YXZ');
-			});
+		}
+
+		function handleOrientation(e) {
+			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+			camera.rotation.set(b, g, a, 'YXZ');
 		}
 
 		startBtn.onclick = async () => {
+			ui.style.display = "none";
+			video.style.display = "block";
+			debug.style.display = "block";
+			
 			await startSensors();
+			init3D();
+			
+			camHelper = new Camera(video, {
+				onFrame: async () => { await hands.send({image: video}); },
+				width: 1280, 
+				height: 720,
+				facingMode: "environment"
+			});
+			
+			camHelper.start();
 			isRunning = true;
-			startBtn.style.display = "none";
+			animate();
 		};
 
 		const hands = new Hands({
 			locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 		});
 
-		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+		hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 		hands.onResults((results) => {
 			canvas2d.width = window.innerWidth;
 			canvas2d.height = window.innerHeight;
@@ -107,29 +125,23 @@
 
 				const thumb = landmarks[4];
 				const index = landmarks[8];
-				const dist = Math.sqrt(Math.pow(thumb.x - index.x, 2) + Math.pow(thumb.y - index.y, 2));
+				
+				const dist3D = Math.sqrt(
+					Math.pow(thumb.x - index.x, 2) + 
+					Math.pow(thumb.y - index.y, 2) + 
+					Math.pow(thumb.z - index.z, 2)
+				);
 
 				const handX = (thumb.x + index.x) / 2;
 				const handY = (thumb.y + index.y) / 2;
 				
 				handNDC.set((handX * 2) - 1, -(handY * 2) + 1, 0.5);
 
-				if (dist < 0.08) {
+				if (dist3D < 0.07) {
 					isPinching = true;
 				}
 			}
-			renderer.render(scene, camera);
 		});
-
-		const camHelper = new Camera(video, {
-			onFrame: async () => { await hands.send({image: video}); },
-			width: 1280, 
-			height: 720,
-			facingMode: "environment"
-		});
-
-		init3D();
-		camHelper.start();
 
 		function animate() {
 			requestAnimationFrame(animate);
@@ -139,7 +151,7 @@
 				const distToPanel = Math.sqrt(Math.pow(handNDC.x - panelScreenPos.x, 2) + Math.pow(handNDC.y - panelScreenPos.y, 2));
 
 				if (isPinching) {
-					if (appState === "FOLLOW" || (appState === "STATIONARY" && distToPanel < 0.4)) {
+					if (appState === "FOLLOW" || (appState === "STATIONARY" && distToPanel < 0.5)) {
 						appState = "DRAG";
 					}
 				} else {
@@ -148,13 +160,14 @@
 					}
 				}
 
+				debug.innerText = `STATE: ${appState}\nPINCH: ${isPinching ? "YES" : "NO"}\nDIST: ${distToPanel.toFixed(2)}`;
+
 				if (appState === "FOLLOW") {
 					targetPosition.set(0, 0, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
 					panel.position.lerp(targetPosition, 0.05);
 					panel.quaternion.slerp(camera.quaternion, 0.05);
 				} else if (appState === "DRAG") {
 					const tempVec = handNDC.clone();
-					tempVec.z = 0.5;
 					tempVec.unproject(camera);
 					const dir = tempVec.sub(camera.position).normalize();
 					const dragTarget = camera.position.clone().add(dir.multiplyScalar(1.5));
@@ -164,14 +177,17 @@
 				}
 			}
 
-			renderer.render(scene, camera);
+			if (renderer && scene && camera) {
+				renderer.render(scene, camera);
+			}
 		}
-		animate();
 
 		window.addEventListener('resize', () => {
-			camera.aspect = window.innerWidth / window.innerHeight;
-			camera.updateProjectionMatrix();
-			renderer.setSize(window.innerWidth, window.innerHeight);
+			if (camera && renderer) {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
 		});
 	</script>
 </body>
