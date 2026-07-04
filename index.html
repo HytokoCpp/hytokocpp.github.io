@@ -21,7 +21,7 @@
 </head>
 <body>
 
-	<div id="status">LOOK AT FLOOR</div>
+	<div id="status">POINT TO FLOOR & FIX</div>
 	<video id="input_video" playsinline autoplay muted></video>
 	<canvas id="canvas_3d"></canvas>
 	<canvas id="canvas_2d"></canvas>
@@ -105,18 +105,13 @@
 
 		const camHelper = new Camera(video, {
 			onFrame: async () => { await hands.send({image: video}); },
-			width: 1280, height: 720
+			width: 1280, 
+			height: 720,
+			facingMode: "environment"
 		});
 
 		init3D();
-
-		navigator.mediaDevices.getUserMedia({ 
-			video: { facingMode: "environment", width: 1280, height: 720 } 
-		}).then((stream) => {
-			video.srcObject = stream;
-			camHelper.start();
-			status.innerText = "POINT TO FLOOR & FIX";
-		});
+		camHelper.start();
 
 		function animate() {
 			requestAnimationFrame(animate);
