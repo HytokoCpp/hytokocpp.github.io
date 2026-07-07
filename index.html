@@ -10,6 +10,22 @@
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 	<style>
 		body { margin: 0; background: #000; overflow: hidden; position: fixed; width: 100vw; height: 100vh; }
+		#ar_wrapper {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+		}
+		@media screen and (orientation: landscape) {
+			#ar_wrapper {
+				top: 50%;
+				left: 50%;
+				width: 100vh;
+				height: 100vw;
+				transform: translate(-50%, -50%) rotate(-90deg);
+			}
+		}
 		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
 		canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 		#canvas_3d { z-index: 2; }
@@ -20,9 +36,11 @@
 </head>
 <body>
 
-	<video id="input_video" playsinline autoplay muted></video>
-	<canvas id="canvas_3d"></canvas>
-	<canvas id="canvas_2d"></canvas>
+	<div id="ar_wrapper">
+		<video id="input_video" playsinline autoplay muted></video>
+		<canvas id="canvas_3d"></canvas>
+		<canvas id="canvas_2d"></canvas>
+	</div>
 
 	<div id="ui">
 		<button class="btn" id="startBtn">START VISION</button>
@@ -60,12 +78,23 @@
 			const material = new THREE.MeshBasicMaterial({ 
 				color: 0xffffff, 
 				transparent: true, 
-				opacity: 0.9,
+				opacity: 0.15,
 				side: THREE.DoubleSide
 			});
 			panel = new THREE.Mesh(geometry, material);
 			panel.position.set(0, 0, -1.5);
 			scene.add(panel);
+
+			const edges = new THREE.EdgesGeometry(geometry);
+			const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2, transparent: true, opacity: 0.8 });
+			const border = new THREE.LineSegments(edges, lineMat);
+			panel.add(border);
+
+			const barGeo = new THREE.BoxGeometry(0.02, 0.5, 0.02);
+			const barMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+			const grabBar = new THREE.Mesh(barGeo, barMat);
+			grabBar.position.set(-0.41, 0, 0);
+			panel.add(grabBar);
 		}
 
 		async function startSensors() {
@@ -83,12 +112,7 @@
 			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
 			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
 			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-
-			if (window.innerWidth > window.innerHeight) {
-				camera.rotation.set(-g, b, a - Math.PI / 2, 'YXZ');
-			} else {
-				camera.rotation.set(b, g, a, 'YXZ');
-			}
+			camera.rotation.set(b, g, a, 'YXZ');
 		}
 
 		startBtn.onclick = async () => {
@@ -123,26 +147,9 @@
 			isPinching = false;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-				const rawLandmarks = results.multiHandLandmarks[0];
+				const landmarks = results.multiHandLandmarks[0];
 				
-				const landmarks = rawLandmarks.map(lm => {
-					let rx, ry;
-					if (window.innerWidth > window.innerHeight) {
-						if (window.orientation === 90) {
-							rx = lm.y;
-							ry = 1 - lm.x;
-						} else {
-							rx = 1 - lm.y;
-							ry = lm.x;
-						}
-					} else {
-						rx = lm.x;
-						ry = lm.y;
-					}
-					return { x: rx, y: ry, z: lm.z };
-				});
-
-				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
+				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: 'rgba(255, 255, 255, 0.4)', lineWidth: 3});
 				drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
 
 				const thumb = landmarks[4];
@@ -231,4 +238,4 @@
 		});
 	</script>
 </body>
-</html>
+</html>в
