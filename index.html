@@ -44,8 +44,12 @@
 		let camHelper;
 		let handSize = 0.15;
 
-		let smoothedAlpha = 0, smoothedBeta = 0, smoothedGamma = 0;
-		const filterFactor = 0.05;
+		const filterFactor = 0.15;
+		const zee = new THREE.Vector3(0, 0, 1);
+		const euler = new THREE.Euler();
+		const q0 = new THREE.Quaternion();
+		const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+		const targetQuaternion = new THREE.Quaternion();
 
 		const targetPosition = new THREE.Vector3();
 		const raycaster = new THREE.Raycaster();
@@ -53,7 +57,6 @@
 		function init3D() {
 			scene = new THREE.Scene();
 			camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-			camera.rotation.reorder('YXZ');
 			
 			renderer = new THREE.WebGLRenderer({ canvas: canvas3d, alpha: true, antialias: true });
 			renderer.setSize(window.innerWidth, window.innerHeight);
@@ -86,12 +89,16 @@
 			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
 			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
 			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+			const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
 
-			smoothedAlpha += (a - smoothedAlpha) * filterFactor;
-			smoothedBeta += (b - smoothedBeta) * filterFactor;
-			smoothedGamma += (g - smoothedGamma) * filterFactor;
+			euler.set(b, a, -g, 'YXZ');
+			targetQuaternion.setFromEuler(euler);
+			
+			q0.setFromAxisAngle(zee, -orient);
+			targetQuaternion.multiply(q0);
+			targetQuaternion.multiply(q1);
 
-			camera.rotation.set(smoothedBeta, smoothedGamma, smoothedAlpha, 'YXZ');
+			camera.quaternion.slerp(targetQuaternion, filterFactor);
 		}
 
 		startBtn.onclick = async () => {
@@ -126,8 +133,25 @@
 			isPinching = false;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-				const landmarks = results.multiHandLandmarks[0];
+				const rawLandmarks = results.multiHandLandmarks[0];
 				
+				const landmarks = rawLandmarks.map(lm => {
+					let rx, ry;
+					if (window.innerWidth > window.innerHeight) {
+						if (window.orientation === 90) {
+							rx = lm.y;
+							ry = 1 - lm.x;
+						} else {
+							rx = 1 - lm.y;
+							ry = lm.x;
+						}
+					} else {
+						rx = lm.x;
+						ry = lm.y;
+					}
+					return { x: rx, y: ry, z: lm.z };
+				});
+
 				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 4});
 				drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
 
