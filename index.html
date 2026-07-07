@@ -14,17 +14,8 @@
 			position: absolute;
 			top: 0;
 			left: 0;
-			width: 100vw;
-			height: 100vh;
-		}
-		@media screen and (orientation: landscape) {
-			#ar_wrapper {
-				top: 50%;
-				left: 50%;
-				width: 100vh;
-				height: 100vw;
-				transform: translate(-50%, -50%) rotate(-90deg);
-			}
+			width: 100%;
+			height: 100%;
 		}
 		#input_video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
 		canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -74,7 +65,7 @@
 			renderer.setSize(window.innerWidth, window.innerHeight);
 			renderer.setPixelRatio(window.devicePixelRatio);
 
-			const geometry = new THREE.BoxGeometry(0.8, 0.5, 0.02);
+			const geometry = new THREE.BoxGeometry(0.6, 0.38, 0.02);
 			const material = new THREE.MeshBasicMaterial({ 
 				color: 0xffffff, 
 				transparent: true, 
@@ -90,10 +81,10 @@
 			const border = new THREE.LineSegments(edges, lineMat);
 			panel.add(border);
 
-			const barGeo = new THREE.BoxGeometry(0.02, 0.5, 0.02);
+			const barGeo = new THREE.BoxGeometry(0.02, 0.38, 0.02);
 			const barMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
 			const grabBar = new THREE.Mesh(barGeo, barMat);
-			grabBar.position.set(-0.41, 0, 0);
+			grabBar.position.set(-0.31, 0, 0);
 			panel.add(grabBar);
 		}
 
@@ -112,7 +103,12 @@
 			const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
 			const b = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
 			const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-			camera.rotation.set(b, g, a, 'YXZ');
+
+			if (window.innerWidth > window.innerHeight) {
+				camera.rotation.set(-g, b, a - Math.PI / 2, 'YXZ');
+			} else {
+				camera.rotation.set(b, g, a, 'YXZ');
+			}
 		}
 
 		startBtn.onclick = async () => {
@@ -147,8 +143,20 @@
 			isPinching = false;
 
 			if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-				const landmarks = results.multiHandLandmarks[0];
+				const rawLandmarks = results.multiHandLandmarks[0];
 				
+				const landmarks = rawLandmarks.map(lm => {
+					let rx, ry;
+					if (window.innerWidth > window.innerHeight) {
+						rx = lm.y;
+						ry = 1 - lm.x;
+					} else {
+						rx = lm.x;
+						ry = lm.y;
+					}
+					return { x: rx, y: ry, z: lm.z };
+				});
+
 				drawConnectors(ctx2d, landmarks, HAND_CONNECTIONS, {color: 'rgba(255, 255, 255, 0.4)', lineWidth: 3});
 				drawLandmarks(ctx2d, landmarks, {color: '#ffffff', lineWidth: 1, radius: 2});
 
@@ -185,7 +193,7 @@
 			
 			if (panel && isRunning) {
 				const panelScreenPos = panel.position.clone().project(camera);
-				const isNearLeftEdge = (panelScreenPos.x - handNDC.x) > 0.15 && (panelScreenPos.x - handNDC.x) < 0.55 && Math.abs(handNDC.y - panelScreenPos.y) < 0.45;
+				const isNearLeftEdge = (panelScreenPos.x - handNDC.x) > 0.10 && (panelScreenPos.x - handNDC.x) < 0.45 && Math.abs(handNDC.y - panelScreenPos.y) < 0.35;
 
 				if (isPinching) {
 					if (appState === "FOLLOW" && isNearLeftEdge) {
@@ -238,4 +246,4 @@
 		});
 	</script>
 </body>
-</html>в
+</html>
